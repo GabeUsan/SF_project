@@ -1,0 +1,4 @@
+With this project I want to evaluate the impact of homeless on businesses' relocation decisions in San Francisco. 
+I am cleaning and manipulating the data, trying to understand the data I need.
+I found two datasets: one includes business in SF with start and end date and the other includes reports (311 cases). 
+I want to build a survival model and a regression model.
