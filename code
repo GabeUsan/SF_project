@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import pandas as pd
 import numpy as np
 from datetime import datetime as dt
@@ -23,13 +24,13 @@ def get_all_paths(subfolder):
     return files
 
 file_paths = get_all_paths('relocation_SF')
-file_paths
+print(file_paths)
 
 filename = 'relocation_SF/Registered_Business_Locations_San_Francisco.csv'.split('/')
 print(filename)
 
 ticker = filename[1].split('.')[0]
-ticker
+print(ticker)
 
 def get_ticker_from_filepath(filepath):
     filename = filepath.split('/')[-1]
@@ -47,85 +48,63 @@ def get_df_from_file(filepath):
 
 #opening dataframe related to locations
 business_locations = get_df_from_file(file_paths[0])
-business_locations.shape
-business_locations.columns
+print('Business locations dataframe shape: ', business_locations.shape)
+print('Business locations dataframe columns: ', business_locations.columns)
 
 #opening dataframe related to reports
-reports_SF = get_df_from_file(file_paths[1])
-reports_SF.shape
-reports_SF.columns
+reports_311 = get_df_from_file(file_paths[1])
+print('Reports 311 cases dataframe shape: ', reports_311.shape)
+print('Reports 311 cases dataframe collumns: ', reports_311.columns)
 
-
+#############
+#WORKING ON BUSINESS LOCATIONS
 business_locations = business_locations[business_locations.City == 'San Francisco']
-business_locations.shape
-
 business_locations.drop(['Ownership Name', 'Business Start Date', 'Business End Date', 'Mail Address', 'Mail City', 'Mail Zipcode', 'Mail State', 'NAICS Code', 'Parking Tax', 'Transient Occupancy Tax', 'LIC Code', 'LIC Code Description', 'Supervisor District', 'Business Corridor'], axis=1, inplace=True)
-business_locations.shape
+business_locations.rename(columns={'Neighborhoods - Analysis Boundaries':'Neighborhood', 'DBA Name':'Name'}, inplace=True)
 
-business_locations = business_locations.rename(columns={'Neighborhoods - Analysis Boundaries':'Neighborhood'})
-
+print('Converting start dates with datetime....')
 business_locations['Location Start Date'] = pd.to_datetime(business_locations['Location Start Date'])
+
+print('Converting end dates with datetime....')
 business_locations['Location End Date'] = pd.to_datetime(business_locations['Location End Date'])
 
-#calculating days of business in a location. NaT occurs when there is no end date so I need to understand if those businesses are still functioning or the information is simply missing
 business_locations['Days of business'] = business_locations['Location End Date'] - business_locations['Location Start Date']
 
-business_locations.reset_index(inplace=True)
+def reset_index_drop (dataframe):
+    dataframe.reset_index(inplace=True)
+    dataframe.drop(['index'], axis=1, inplace=True)
 
-business_locations.drop(['index'], axis=1, inplace=True) #dropping the column
+reset_index_drop (business_locations)
 
-#converting days of businesses to floats as a numbpy series
 business_locations['Days'] = business_locations['Days of business'] / np.timedelta64(1, 'D')
 business_locations['Years'] = business_locations['Days'] / 365
 
-business_ended = business_locations[business_locations.Days > 0]
-business_ended.dropna(subset=['Neighborhood'], inplace=True)
+business_locations.dropna(subset=['Neighborhood'], inplace=True)
 
-list_neighborhoods = []
-for hood in set(business_ended['Neighborhood']):
-    list_neighborhoods.append(hood)
+reset_index_drop (business_locations)
+
+columns_to_convert = ['Location Id', 'Business Account Number']
+for c in columns_to_convert:
+    business_locations[c] = business_locations[c].astype(str)
+
+business_locations.drop_duplicates(subset='Name', keep='first', inplace=True)
+business_locations.set_index('Name', inplace=True)    
     
-business_end_group = business_ended.groupby('Neighborhood')['Years'].mean()
+def get_business_info(dataframe, index):
+    start_date = dataframe.loc[index]['Location Start Date']
+    end_date = dataframe.loc[index]['Location End Date']
+    hood = dataframe.loc[index]['Neighborhood']
+    single_business_dict = {'Location Start Date': start_date, 'Location End Date': end_date, 'Neighborhood': hood}
+    return single_business_dict
 
-def convert_series_to_df (series):
-    new_df = series.to_frame()
-    return new_df
+businesses_dict = {}
+start = time.time()
+for business in business_locations.index:
+    single_dict = get_business_info(business_locations, business)
+    businesses_dict[business] = single_dict
+    print(business,' done!')
+end = time.time()
+print(end - start, 'seconds')
 
-neighborhood_avg_years = convert_series_to_df (business_end_group)
-neighborhood_avg_years = neighborhood_avg_years.round(2)
-#neighborhood_avg_years.reset_index(level=0, inplace=True) #to reset index and have neighborhood as column
-
-avg_years_chart = neighborhood_avg_years.plot(figsize=(20,10),kind='bar')
-plt.suptitle('Average years in each Neighborhood', fontsize=24)
-
-count_businesses = business_ended.groupby('Neighborhood').size()
-count_businesses_df = convert_series_to_df (count_businesses)
-count_businesses_df.columns = ['Total number of businesses']
-
-count_business_chart = count_businesses_df.plot(figsize=(20,10),kind='bar')
-plt.suptitle('Total number of businesses', fontsize=24)
-
-
-main_relocation_df = neighborhood_avg_years
-main_relocation_df['Total number of businesses'] = count_businesses_df['Total number of businesses']
-
-
-std_years = business_ended.groupby('Neighborhood')['Years'].std()
-std_years_df = convert_series_to_df(std_years)
-std_years_df.columns = ['Standard deviation (years)']
-main_relocation_df['Standard deviation (years)'] = std_years_df['Standard deviation (years)']
-
-
-main_relocation_df['Years'].plot(figsize=(12,8), kind='barh')
-plt.suptitle('Average Years in each Neighborhood', fontsize=20)
-
-main_relocation_df['Total number of businesses'].plot(figsize=(12,8), kind='barh')
-plt.suptitle('Total number of businesses', fontsize=20)
-
-main_relocation_df['Standard deviation (years)'].plot(figsize=(12,8), kind='barh')
-plt.suptitle('Years Standard Deviation', fontsize=20)
-
-
-#CLEANING SECOND DATASET
-homeless_concerns_df = reports_SF[reports_SF.Category == 'Homeless Concerns']
-encampents_df = reports_SF[reports_SF.Category == 'Encampments']
+SF_companies = pd.DataFrame(businesses_dict)
+SF_companies = SF_companies.T
