@@ -4,8 +4,8 @@ import time
 import pandas as pd
 import numpy as np
 from datetime import datetime as dt
+from datetime import timedelta, date
 from matplotlib import pyplot as plt
-
 
 def get_file_paths (folder, full_path=True):
     file_paths = []
@@ -55,6 +55,8 @@ print('Business locations dataframe columns: ', business_locations.columns)
 reports_311 = get_df_from_file(file_paths[1])
 print('Reports 311 cases dataframe shape: ', reports_311.shape)
 print('Reports 311 cases dataframe collumns: ', reports_311.columns)
+reports_311['CaseID'] = reports_311['CaseID'].astype(str)
+reports_311.drop(['Closed', 'Updated', 'Status', 'Status Notes', 'Responsible Agency', 'Request Type', 'Request Details', 'Address', 'Street', 'Supervisor District', 'Police District', 'Latitude', 'Longitude', 'Point', 'Source', 'Media URL', 'ticker'], axis=1, inplace=True)
 
 #############
 #WORKING ON BUSINESS LOCATIONS
@@ -98,13 +100,91 @@ def get_business_info(dataframe, index):
     return single_business_dict
 
 businesses_dict = {}
-start = time.time()
+
 for business in business_locations.index:
     single_dict = get_business_info(business_locations, business)
     businesses_dict[business] = single_dict
-    print(business,' done!')
-end = time.time()
-print(end - start, 'seconds')
+    print(business,' added!')
 
 SF_companies = pd.DataFrame(businesses_dict)
 SF_companies = SF_companies.T
+SF_companies['Location End Date'].fillna(0, inplace=True)
+
+
+def get_end_date (dataframe, business_name):
+    date_ = dataframe['Location End Date'].loc[business_name]
+    return date_
+
+for company in SF_companies.index:
+    end_date = get_end_date(SF_companies, company)
+    if end_date == 0:
+        SF_companies['Location End Date'].loc[company] = date.today()
+        print('Date converted for {} ...'.format(company))
+
+for company in SF_companies.index:
+    end_date = get_end_date(SF_companies, company) 
+    SF_companies['Location End Date'].loc[company] = dt.combine(end_date, dt.min.time())
+    print('Date converted for {} ...'.format(company))
+
+
+#def daterange(date1, date2):
+#    for n in range(int ((date2 - date1).days)+1):
+#        yield date1 + timedelta(n)
+#
+#list_years=[]
+#for company in SF_companies.index:
+#    start_date = SF_companies['Location Start Date'].loc[company]
+#    end_date = SF_companies['Location End Date'].loc[company]
+#    for date_ in daterange(start_date, end_date):
+#        list_years.append(dt.strftime("%Y"))
+
+
+
+#############
+#WORKING ON REPORTS 311
+homeless_concerns_df = reports_311[reports_311.Category == 'Homeless Concerns']
+homeless_concerns_df.set_index('CaseID', inplace=True)
+homeless_concerns_df['Opened'] = pd.to_datetime(homeless_concerns_df['Opened'])
+print('The least recent case was opened on this date: {}'.format(homeless_concerns_df['Opened'].min()))
+
+encampents_df = reports_311[reports_311.Category == 'Encampments']
+encampents_df.set_index('CaseID', inplace=True)
+encampents_df['Opened'] = pd.to_datetime(encampents_df['Opened'])
+print('The least recent case was opened on this date: {}'.format(encampents_df['Opened'].min()))
+
+least_recent_case = encampents_df['Opened'].min()
+
+dataframes = [homeless_concerns_df, encampents_df]
+
+homeless_reports = pd.concat(dataframes)
+    
+#############
+#BACK TO FIRST DATATSET
+# I need to drop all business observations with end date prior to Julie 7th 2009
+SF_companies = SF_companies[SF_companies['Location End Date'] > least_recent_case]
+
+date_for_df = '2019-01-01'
+date_filter = dt.strptime(date_for_df, '%Y-%m-%d')
+SF_companies = SF_companies[SF_companies['Location End Date'] < date_filter]
+
+
+#############
+#Quickly on homeless_reports
+homeless_reports = homeless_reports[homeless_reports['Opened'] < date_filter]
+
+
+############
+#Working on BOTH
+
+neighborhoods_SF_companies = []
+for hood in SF_companies['Neighborhood']:
+    neighborhoods_SF_companies.append(hood)
+neighborhoods_SF_companies = set(neighborhoods_SF_companies)
+
+neighborhoods_homeless_reports = []
+for hood in homeless_reports['Neighborhood']:
+    neighborhoods_homeless_reports.append(hood)
+neighborhoods_homeless_reports = set(neighborhoods_homeless_reports)
+
+common_hoods = set.intersection(neighborhoods_SF_companies, neighborhoods_homeless_reports)
+
